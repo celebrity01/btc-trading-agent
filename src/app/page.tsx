@@ -2,18 +2,16 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo, memo } from 'react'
 import {
-  TrendingUp, TrendingDown, Database, Activity,
-  BarChart3, Brain, Clock, ArrowUpRight, ArrowDownRight,
-  Copy, CheckCircle2, XCircle, AlertTriangle, Zap, Target,
-  ChevronUp, ChevronDown, Minus, Wifi, Loader2, Settings2
+  TrendingUp, TrendingDown, Activity, BarChart3, Clock,
+  ArrowUpRight, ArrowDownRight, Copy, CheckCircle2, XCircle,
+  Zap, Target, ChevronUp, ChevronDown, Minus, Wifi, Loader2,
+  AlertTriangle, Database
 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Separator } from '@/components/ui/separator'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
@@ -27,26 +25,26 @@ const RechartsAreaChart = dynamic(
     const { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip: RT, ResponsiveContainer, ReferenceLine } = mod
     return function LazyChart({ data }: { data: WinRateDataPoint[] }) {
       return (
-        <ResponsiveContainer width="100%" height={280}>
-          <AreaChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart data={data} margin={{ top: 5, right: 5, left: -25, bottom: 5 }}>
             <defs>
-              <linearGradient id="winRateGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={BULLISH_COLOR} stopOpacity={0.3} />
-                <stop offset="95%" stopColor={BULLISH_COLOR} stopOpacity={0} />
+              <linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis dataKey="time" tick={{ fill: '#71717a', fontSize: 10 }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} />
-            <YAxis domain={[0, 100]} tick={{ fill: '#71717a', fontSize: 10 }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} tickFormatter={(v: number) => `${v}%`} />
-            <RT contentStyle={{ backgroundColor: '#18181b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '12px', color: '#fafafa' }} formatter={(value: number) => [`${value.toFixed(1)}%`, 'Win Rate']} />
-            <ReferenceLine y={50} stroke="rgba(255,255,255,0.2)" strokeDasharray="5 5" label={{ value: '50%', position: 'right', fill: '#71717a', fontSize: 10 }} />
-            <Area type="monotone" dataKey="winRate" stroke={BULLISH_COLOR} strokeWidth={2} fill="url(#winRateGradient)" dot={false} activeDot={{ r: 4, fill: BULLISH_COLOR, stroke: '#fff', strokeWidth: 2 }} />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+            <XAxis dataKey="time" tick={{ fill: '#71717a', fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis domain={[0, 100]} tick={{ fill: '#71717a', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${v}%`} />
+            <RT contentStyle={{ backgroundColor: '#18181b', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', fontSize: '11px', color: '#fafafa' }} formatter={(value: number) => [`${value.toFixed(1)}%`, 'Win Rate']} />
+            <ReferenceLine y={50} stroke="rgba(255,255,255,0.15)" strokeDasharray="5 5" />
+            <Area type="monotone" dataKey="winRate" stroke="#10b981" strokeWidth={2} fill="url(#wg)" dot={false} activeDot={{ r: 3, fill: '#10b981', stroke: '#fff', strokeWidth: 2 }} />
           </AreaChart>
         </ResponsiveContainer>
       )
     }
   }),
-  { ssr: false, loading: () => <div className="h-[280px] flex items-center justify-center"><Loader2 className="h-6 w-6 text-zinc-700 animate-spin" /></div> }
+  { ssr: false, loading: () => <div className="h-[220px] flex items-center justify-center"><Loader2 className="h-5 w-5 text-zinc-700 animate-spin" /></div> }
 )
 
 // ---------------------------------------------------------------------------
@@ -57,7 +55,6 @@ interface SignalDetail {
   name: string
   type: 'bullish' | 'bearish' | 'neutral'
   strength: number
-  description: string
 }
 
 interface LatestPrediction {
@@ -139,11 +136,11 @@ interface DashboardState {
 // Constants
 // ---------------------------------------------------------------------------
 
-const BULLISH_COLOR = '#00C853'
-const BEARISH_COLOR = '#FF1744'
-const REFRESH_INTERVAL = 30000
+const BULL = '#10b981'
+const BEAR = '#ef4444'
+const REFRESH = 30000
 
-const INITIAL_STATE: DashboardState = {
+const INIT: DashboardState = {
   status: null,
   predictions: null,
   setupDb: null,
@@ -155,118 +152,73 @@ const INITIAL_STATE: DashboardState = {
   winRateHistory: [],
 }
 
-// Indicator config shown in the UI
-const INDICATOR_CONFIG = {
-  rsi_period: 14,
-  stoch_period: 14,
-  k_smooth: 3,
-  d_smooth: 3,
-  ma_type: 'SMA',
-  ma_period: 3,
-  overbought: 80,
-  oversold: 20,
-  stochrsi_weight: '60%',
-  ma_weight: '40%',
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatPrice(price: number | null): string {
-  if (price === null || price === undefined) return '---'
-  return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+function fmtPrice(p: number | null): string {
+  if (p === null || p === undefined) return '---'
+  return p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function formatPercent(value: number | null): string {
-  if (value === null || value === undefined) return '---'
-  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+function fmtPct(v: number | null): string {
+  if (v === null || v === undefined) return '---'
+  return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`
 }
 
-function formatTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return '---'
+function fmtTime(s: string | null | undefined): string {
+  if (!s) return '---'
+  try { return new Date(s).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) }
+  catch { return '---' }
+}
+
+function fmtDT(s: string | null | undefined): string {
+  if (!s) return '---'
+  try { return new Date(s).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
+  catch { return '---' }
+}
+
+function ago(s: string | null | undefined): string {
+  if (!s) return ''
   try {
-    const date = new Date(dateStr)
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  } catch { return '---' }
-}
-
-function formatDateTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return '---'
-  try {
-    const date = new Date(dateStr)
-    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-  } catch { return '---' }
-}
-
-function timeAgo(dateStr: string | null | undefined): string {
-  if (!dateStr) return ''
-  try {
-    const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
-    if (diff < 60) return `${diff}s ago`
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-    return `${Math.floor(diff / 86400)}d ago`
+    const d = Math.floor((Date.now() - new Date(s).getTime()) / 1000)
+    if (d < 60) return `${d}s`
+    if (d < 3600) return `${Math.floor(d / 60)}m`
+    if (d < 86400) return `${Math.floor(d / 3600)}h`
+    return `${Math.floor(d / 86400)}d`
   } catch { return '' }
 }
 
-function buildWinRateData(preds: PredictionWithOutcome[]): WinRateDataPoint[] {
+function buildWinRate(preds: PredictionWithOutcome[]): WinRateDataPoint[] {
   if (!preds || preds.length === 0) return []
-  const evaluated = preds.filter(p => p.outcome === 'WIN' || p.outcome === 'LOSS').reverse()
-  let wins = 0, total = 0
-  const points: WinRateDataPoint[] = []
-  for (const pred of evaluated) {
-    total++
-    if (pred.outcome === 'WIN') wins++
-    points.push({ time: formatTime(pred.created_at || pred.prediction_time), winRate: Math.round((wins / total) * 1000) / 10 })
+  const ev = preds.filter(p => p.outcome === 'WIN' || p.outcome === 'LOSS').reverse()
+  let w = 0, t = 0
+  const pts: WinRateDataPoint[] = []
+  for (const p of ev) {
+    t++
+    if (p.outcome === 'WIN') w++
+    pts.push({ time: fmtTime(p.created_at || p.prediction_time), winRate: Math.round((w / t) * 1000) / 10 })
   }
-  return points.length > 30 ? points.filter((_, i) => i % Math.ceil(points.length / 30) === 0 || i === points.length - 1) : points
+  return pts.length > 30 ? pts.filter((_, i) => i % Math.ceil(pts.length / 30) === 0 || i === pts.length - 1) : pts
 }
 
 // ---------------------------------------------------------------------------
 // Memoized sub-components
 // ---------------------------------------------------------------------------
 
-const CircularProgress = memo(function CircularProgress({ value, size = 80, strokeWidth = 6, color = BULLISH_COLOR }: {
-  value: number; size?: number; strokeWidth?: number; color?: string
+const Ring = memo(function Ring({ value, size = 72, sw = 5, color = BULL }: {
+  value: number; size?: number; sw?: number; color?: string
 }) {
-  const radius = (size - strokeWidth) / 2
-  const circumference = 2 * Math.PI * radius
-  const offset = circumference - (value / 100) * circumference
+  const r = (size - sw) / 2
+  const c = 2 * Math.PI * r
+  const off = c - (value / 100) * c
   return (
     <svg width={size} height={size} className="transform -rotate-90">
-      <circle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(255,255,255,0.1)" strokeWidth={strokeWidth} fill="none" />
-      <circle cx={size / 2} cy={size / 2} r={radius} stroke={color} strokeWidth={strokeWidth} fill="none"
-        strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
-        style={{ transition: 'stroke-dashoffset 0.7s ease-out, stroke 0.5s ease' }} />
+      <circle cx={size / 2} cy={size / 2} r={r} stroke="rgba(255,255,255,0.07)" strokeWidth={sw} fill="none" />
+      <circle cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={sw} fill="none"
+        strokeDasharray={c} strokeDashoffset={off} strokeLinecap="round"
+        style={{ transition: 'stroke-dashoffset 0.6s ease-out, stroke 0.4s ease' }} />
     </svg>
-  )
-})
-
-const StatCard = memo(function StatCard({ title, value, subtitle, icon: Icon, color }: {
-  title: string; value: string | number; subtitle?: string;
-  icon: React.ComponentType<{ className?: string }>; color?: string
-}) {
-  return (
-    <Card className="bg-zinc-900/80 border-zinc-800/60 backdrop-blur-sm hover:border-zinc-700/60 transition-colors">
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{title}</span>
-          <Icon className="h-4 w-4 text-zinc-600" />
-        </div>
-        <div className="text-2xl font-bold tracking-tight" style={{ color: color || 'rgb(250 250 250)' }}>{value}</div>
-        {subtitle && <p className="text-xs text-zinc-500 mt-1">{subtitle}</p>}
-      </CardContent>
-    </Card>
-  )
-})
-
-const ConfigBox = memo(function ConfigBox({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="bg-zinc-800/50 rounded-lg px-3 py-2">
-      <span className="text-[10px] text-zinc-500 block leading-tight">{label}</span>
-      <span className="text-sm font-bold text-white font-mono">{value}</span>
-    </div>
   )
 })
 
@@ -275,50 +227,50 @@ const ConfigBox = memo(function ConfigBox({ label, value }: { label: string; val
 // ---------------------------------------------------------------------------
 
 export default function Home() {
-  const [state, setState] = useState<DashboardState>(INITIAL_STATE)
+  const [state, setState] = useState<DashboardState>(INIT)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const mountedRef = useRef(false)
 
   const fetchStatusRef = useRef(async () => {
     try {
-      const res = await fetch('/api/status')
-      if (!res.ok) throw new Error('Failed')
-      return (await res.json()) as StatusData
+      const r = await fetch('/api/status')
+      if (!r.ok) throw new Error()
+      return (await r.json()) as StatusData
     } catch { return null }
   })
 
-  const fetchPredictionsRef = useRef(async () => {
+  const fetchPredsRef = useRef(async () => {
     try {
-      const res = await fetch('/api/predictions?limit=50&offset=0')
-      if (!res.ok) throw new Error('Failed')
-      return (await res.json()) as PredictionsData
+      const r = await fetch('/api/predictions?limit=50&offset=0')
+      if (!r.ok) throw new Error()
+      return (await r.json()) as PredictionsData
     } catch { return null }
   })
 
-  const fetchSetupDbRef = useRef(async () => {
+  const fetchSetupRef = useRef(async () => {
     try {
-      const res = await fetch('/api/setup-db')
-      if (!res.ok) throw new Error('Failed')
-      return (await res.json()) as SetupDbData
+      const r = await fetch('/api/setup-db')
+      if (!r.ok) throw new Error()
+      return (await r.json()) as SetupDbData
     } catch { return null }
   })
 
   const fetchAll = useCallback(async (isRefresh = false) => {
-    const [statusData, predictionsData, setupDbData] = await Promise.all([
+    const [s, p, d] = await Promise.all([
       fetchStatusRef.current(),
-      fetchPredictionsRef.current(),
-      isRefresh ? Promise.resolve(null) : fetchSetupDbRef.current(),
+      fetchPredsRef.current(),
+      isRefresh ? Promise.resolve(null) : fetchSetupRef.current(),
     ])
-    const winRate = predictionsData ? buildWinRateData(predictionsData.predictions || []) : []
+    const wr = p ? buildWinRate(p.predictions || []) : []
     setState(prev => ({
       ...prev,
-      status: statusData ?? prev.status,
-      predictions: predictionsData ?? prev.predictions,
-      setupDb: setupDbData ?? prev.setupDb,
+      status: s ?? prev.status,
+      predictions: p ?? prev.predictions,
+      setupDb: d ?? prev.setupDb,
       loading: false,
       refreshing: false,
       lastUpdated: new Date(),
-      winRateHistory: winRate.length > 0 ? winRate : prev.winRateHistory,
+      winRateHistory: wr.length > 0 ? wr : prev.winRateHistory,
     }))
   }, [])
 
@@ -332,18 +284,17 @@ export default function Home() {
     intervalRef.current = setInterval(() => {
       setState(prev => ({ ...prev, refreshing: true }))
       fetchAll(true)
-    }, REFRESH_INTERVAL)
+    }, REFRESH)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [fetchAll])
 
-  const handleNewPrediction = useCallback(async () => {
+  const handlePredict = useCallback(async () => {
     setState(prev => ({ ...prev, isPredicting: true }))
     try {
-      const res = await fetch('/api/cron/fetch-and-predict')
-      const data = await res.json()
-      if (data.success) await fetchAll(true)
-      else console.error('Prediction failed:', data.error)
-    } catch (err) { console.error('Failed:', err) }
+      const r = await fetch('/api/cron/fetch-and-predict')
+      const d = await r.json()
+      if (d.success) await fetchAll(true)
+    } catch { /* ignore */ }
     finally { setState(prev => ({ ...prev, isPredicting: false })) }
   }, [fetchAll])
 
@@ -357,35 +308,35 @@ export default function Home() {
   }, [state.setupDb?.sql])
 
   // Derived
-  const latestPred = useMemo(() => state.status?.latest_prediction, [state.status])
+  const pred = useMemo(() => state.status?.latest_prediction, [state.status])
   const perf = useMemo(() => state.status?.performance, [state.status])
   const price = useMemo(() => state.status?.price, [state.status])
-  const priceChange = useMemo(() => state.status?.priceChange24h, [state.status])
-  const isUp = priceChange !== null && priceChange !== undefined && priceChange >= 0
+  const chg = useMemo(() => state.status?.priceChange24h, [state.status])
+  const isUp = chg !== null && chg !== undefined && chg >= 0
   const streakType = useMemo(() => !perf ? 'none' : perf.streak > 0 ? 'win' : perf.streak < 0 ? 'loss' : 'none', [perf])
-  const streakCount = useMemo(() => perf ? Math.abs(perf.streak) : 0, [perf])
+  const streakN = useMemo(() => perf ? Math.abs(perf.streak) : 0, [perf])
 
   return (
     <TooltipProvider>
       <div className="min-h-screen bg-zinc-950 text-zinc-100">
         {/* Setup DB Banner */}
         {state.setupDb?.setup_needed && (
-          <Alert className="rounded-none border-x-0 border-t-0 bg-amber-950/50 border-amber-700/50">
+          <Alert className="rounded-none border-x-0 border-t-0 bg-amber-950/40 border-amber-800/40">
             <AlertTriangle className="h-4 w-4 text-amber-400" />
-            <AlertTitle className="text-amber-300 font-semibold">Database Setup Required</AlertTitle>
-            <AlertDescription className="text-amber-200/80 mt-2">
+            <AlertTitle className="text-amber-300 text-sm font-semibold">Database Setup Required</AlertTitle>
+            <AlertDescription className="text-amber-200/70 mt-1.5 text-xs">
               <p className="mb-2">
                 Missing tables: {Object.entries(state.setupDb.tables)
-                  .filter(([, exists]) => !exists)
-                  .map(([name]) => <Badge key={name} variant="outline" className="mr-1 border-amber-600 text-amber-300 text-xs">{name}</Badge>)}
+                  .filter(([, e]) => !e)
+                  .map(([n]) => <Badge key={n} variant="outline" className="mr-1 border-amber-700/50 text-amber-300 text-[10px]">{n}</Badge>)}
               </p>
               {state.setupDb.sql && (
-                <div className="mt-3 relative">
-                  <pre className="bg-zinc-950/80 rounded-lg p-3 text-xs text-zinc-300 overflow-x-auto max-h-40 border border-amber-800/30">
+                <div className="mt-2 relative">
+                  <pre className="bg-zinc-950 rounded-lg p-3 text-[11px] text-zinc-400 overflow-x-auto max-h-32 border border-amber-900/30">
                     <code>{state.setupDb.sql}</code>
                   </pre>
                   <Button size="sm" variant="outline" onClick={handleCopySql}
-                    className="absolute top-2 right-2 bg-zinc-900 border-amber-700/50 text-amber-300 hover:bg-zinc-800 hover:text-amber-200">
+                    className="absolute top-2 right-2 h-6 text-[10px] bg-zinc-900 border-amber-800/50 text-amber-300 hover:bg-zinc-800">
                     {state.copiedSql ? <><CheckCircle2 className="h-3 w-3 mr-1" /> Copied</> : <><Copy className="h-3 w-3 mr-1" /> Copy SQL</>}
                   </Button>
                 </div>
@@ -395,140 +346,130 @@ export default function Home() {
         )}
 
         {/* Header */}
-        <header className="sticky top-0 z-50 bg-zinc-950/90 backdrop-blur-xl border-b border-zinc-800/60">
-          <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-3">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-3 md:gap-5">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
-                    <span className="font-bold text-black text-sm">₿</span>
-                  </div>
-                  <span className="font-semibold text-zinc-300 hidden sm:inline text-sm">BTC Agent</span>
+        <header className="sticky top-0 z-50 bg-zinc-950/95 backdrop-blur-lg border-b border-zinc-800/50">
+          <div className="max-w-5xl mx-auto px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center flex-shrink-0">
+                  <span className="font-bold text-black text-sm">₿</span>
                 </div>
-                <Separator orientation="vertical" className="h-8 bg-zinc-800" />
                 <div>
                   <div className="flex items-center gap-2">
                     {state.loading ? (
-                      <Skeleton className="h-7 w-32 bg-zinc-800" />
+                      <Skeleton className="h-6 w-28 bg-zinc-800" />
                     ) : (
-                      <span className="text-xl md:text-2xl font-bold tracking-tight text-white font-mono">${formatPrice(price)}</span>
+                      <span className="text-lg font-bold text-white font-mono">${fmtPrice(price)}</span>
                     )}
-                    <Badge variant="outline"
-                      className={`text-xs font-semibold border-0 transition-colors duration-300 ${isUp ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>
-                      {isUp ? <ChevronUp className="h-3 w-3 mr-0.5" /> : <ChevronDown className="h-3 w-3 mr-0.5" />}
-                      {formatPercent(priceChange)}
+                    <Badge variant="outline" className={`text-[10px] font-semibold border-0 ${isUp ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                      {isUp ? <ChevronUp className="h-2.5 w-2.5 mr-0.5" /> : <ChevronDown className="h-2.5 w-2.5 mr-0.5" />}
+                      {fmtPct(chg)}
                     </Badge>
                   </div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">BTC / USDT</div>
+                  <div className="text-[10px] text-zinc-500">BTC / USDT</div>
                 </div>
               </div>
-              <div className="flex items-center gap-2 md:gap-3">
+              <div className="flex items-center gap-2">
                 {state.lastUpdated && (
-                  <span className="text-[11px] text-zinc-500 hidden md:inline-flex items-center gap-1">
-                    <Clock className="h-3 w-3" />{timeAgo(state.lastUpdated.toISOString())}
+                  <span className="text-[10px] text-zinc-500 hidden sm:inline-flex items-center gap-1">
+                    <Clock className="h-2.5 w-2.5" />{ago(state.lastUpdated.toISOString())}
                   </span>
                 )}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center">
                       {state.refreshing ? <Loader2 className="h-3 w-3 text-zinc-500 animate-spin" /> : <Wifi className="h-3 w-3 text-emerald-500" />}
                     </div>
                   </TooltipTrigger>
-                  <TooltipContent>{state.refreshing ? 'Refreshing...' : 'Live • Auto-refresh 30s'}</TooltipContent>
+                  <TooltipContent className="text-xs">Live — auto-refresh 30s</TooltipContent>
                 </Tooltip>
                 {state.setupDb && !state.setupDb.setup_needed && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <div className="flex items-center gap-1">
-                        <Database className="h-3.5 w-3.5 text-emerald-500" />
-                        <span className="text-[10px] text-emerald-500 hidden sm:inline">DB</span>
-                      </div>
+                      <Database className="h-3.5 w-3.5 text-emerald-500" />
                     </TooltipTrigger>
-                    <TooltipContent>All database tables ready</TooltipContent>
+                    <TooltipContent className="text-xs">Database connected</TooltipContent>
                   </Tooltip>
                 )}
-                <Button size="sm" onClick={handleNewPrediction} disabled={state.isPredicting}
-                  className="bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white border-0 shadow-lg shadow-emerald-500/20 h-8 px-3">
-                  {state.isPredicting ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Predicting...</> : <><Zap className="h-3.5 w-3.5 mr-1.5" /> New Prediction</>}
+                <Button size="sm" onClick={handlePredict} disabled={state.isPredicting}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white border-0 shadow-lg shadow-emerald-500/15 h-8 px-3 text-xs">
+                  {state.isPredicting ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Running...</> : <><Zap className="h-3 w-3 mr-1" />Predict</>}
                 </Button>
               </div>
             </div>
           </div>
         </header>
 
-        {/* Main Content */}
-        <main className="max-w-[1600px] mx-auto px-4 md:px-6 py-4 md:py-6 space-y-4 md:space-y-5">
+        {/* Main */}
+        <main className="max-w-5xl mx-auto px-4 py-5 space-y-5">
 
-          {/* Current Prediction Card */}
-          <Card className="bg-zinc-900/70 border-zinc-800/50 backdrop-blur-sm overflow-hidden">
+          {/* Prediction Hero */}
+          <Card className="bg-zinc-900/60 border-zinc-800/40 overflow-hidden">
             <CardContent className="p-0">
               {state.loading ? (
-                <div className="p-6"><Skeleton className="h-48 w-full bg-zinc-800 rounded-xl" /></div>
+                <div className="p-8"><Skeleton className="h-40 w-full bg-zinc-800 rounded-xl" /></div>
               ) : (
-                <div className="flex flex-col md:flex-row">
-                  <div className={`relative flex flex-col items-center justify-center px-6 md:px-10 py-6 md:py-8 min-w-[200px] md:min-w-[260px] transition-colors duration-500 ${
-                    latestPred?.direction === 'UP' ? 'bg-gradient-to-br from-emerald-600/20 to-emerald-800/10' : 'bg-gradient-to-br from-red-600/20 to-red-800/10'
+                <div className="flex flex-col sm:flex-row">
+                  {/* Direction side */}
+                  <div className={`flex flex-col items-center justify-center px-8 py-7 sm:min-w-[200px] transition-colors duration-500 ${
+                    pred?.direction === 'UP' ? 'bg-emerald-500/[0.07]' : 'bg-red-500/[0.07]'
                   }`}>
-                    <div className="mb-2">
-                      {latestPred?.direction === 'UP' ? <ArrowUpRight className="h-12 w-12 md:h-16 md:w-16" style={{ color: BULLISH_COLOR }} /> : <ArrowDownRight className="h-12 w-12 md:h-16 md:w-16" style={{ color: BEARISH_COLOR }} />}
+                    <div className="mb-1.5">
+                      {pred?.direction === 'UP' ? <ArrowUpRight className="h-14 w-14 text-emerald-400" /> : <ArrowDownRight className="h-14 w-14 text-red-400" />}
                     </div>
-                    <span className={`text-3xl md:text-4xl font-black tracking-tight transition-colors duration-500 ${latestPred?.direction === 'UP' ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {latestPred?.direction || '---'}
+                    <span className={`text-3xl font-black tracking-tight ${pred?.direction === 'UP' ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {pred?.direction || '---'}
                     </span>
-                    <span className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">{latestPred?.timeframe || '30m'} Prediction</span>
-                    <div className="mt-4 relative flex items-center justify-center">
-                      <CircularProgress value={latestPred?.confidence || 0} size={72} strokeWidth={5} color={latestPred?.direction === 'UP' ? BULLISH_COLOR : BEARISH_COLOR} />
-                      <span className="absolute text-sm font-bold text-white">{latestPred?.confidence ? `${latestPred.confidence}%` : '--'}</span>
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">Next 30m</span>
+                    <div className="mt-3 relative flex items-center justify-center">
+                      <Ring value={pred?.confidence || 0} size={64} sw={4} color={pred?.direction === 'UP' ? BULL : BEAR} />
+                      <span className="absolute text-sm font-bold text-white">{pred?.confidence ? `${pred.confidence}%` : '--'}</span>
                     </div>
-                    <span className="text-[10px] text-zinc-500 mt-1">Confidence</span>
+                    <span className="text-[9px] text-zinc-500 mt-0.5">confidence</span>
                   </div>
-                  <div className="flex-1 p-4 md:p-6 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <Activity className="h-3 w-3" /> StochRSI
-                        </h4>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="bg-zinc-800/60 rounded-lg p-2.5"><span className="text-[10px] text-zinc-500 block">%K</span><span className="text-lg font-bold text-white font-mono">{latestPred?.stochrsi_k?.toFixed(2) ?? '--'}</span></div>
-                          <div className="bg-zinc-800/60 rounded-lg p-2.5"><span className="text-[10px] text-zinc-500 block">%D</span><span className="text-lg font-bold text-white font-mono">{latestPred?.stochrsi_d?.toFixed(2) ?? '--'}</span></div>
+
+                  {/* Details side */}
+                  <div className="flex-1 p-5 space-y-3">
+                    {/* Indicator values */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-zinc-800/40 rounded-lg p-3">
+                        <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                          <Activity className="h-2.5 w-2.5" /> StochRSI
+                        </div>
+                        <div className="flex items-baseline gap-3">
+                          <div><span className="text-[9px] text-zinc-600 block">%K</span><span className="text-base font-bold text-white font-mono">{pred?.stochrsi_k?.toFixed(1) ?? '--'}</span></div>
+                          <div><span className="text-[9px] text-zinc-600 block">%D</span><span className="text-base font-bold text-white font-mono">{pred?.stochrsi_d?.toFixed(1) ?? '--'}</span></div>
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <BarChart3 className="h-3 w-3" /> MA-StochRSI
-                        </h4>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="bg-zinc-800/60 rounded-lg p-2.5"><span className="text-[10px] text-zinc-500 block">%K</span><span className="text-lg font-bold text-white font-mono">{latestPred?.ma_stochrsi_k?.toFixed(2) ?? '--'}</span></div>
-                          <div className="bg-zinc-800/60 rounded-lg p-2.5"><span className="text-[10px] text-zinc-500 block">%D</span><span className="text-lg font-bold text-white font-mono">{latestPred?.ma_stochrsi_d?.toFixed(2) ?? '--'}</span></div>
+                      <div className="bg-zinc-800/40 rounded-lg p-3">
+                        <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                          <BarChart3 className="h-2.5 w-2.5" /> MA-StochRSI
+                        </div>
+                        <div className="flex items-baseline gap-3">
+                          <div><span className="text-[9px] text-zinc-600 block">%K</span><span className="text-base font-bold text-white font-mono">{pred?.ma_stochrsi_k?.toFixed(1) ?? '--'}</span></div>
+                          <div><span className="text-[9px] text-zinc-600 block">%D</span><span className="text-base font-bold text-white font-mono">{pred?.ma_stochrsi_d?.toFixed(1) ?? '--'}</span></div>
                         </div>
                       </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-zinc-400">Confidence</span>
-                        <span className="text-xs font-mono font-bold text-white">{latestPred?.confidence ?? '--'}%</span>
-                      </div>
-                      <Progress value={latestPred?.confidence ?? 0} className="h-2 bg-zinc-800" />
-                    </div>
-                    <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-zinc-400">
-                      <div className="flex items-center gap-1.5"><Clock className="h-3 w-3" /><span>Predicted: {formatTime(latestPred?.prediction_time || latestPred?.created_at)}</span></div>
-                      <div className="flex items-center gap-1.5"><Target className="h-3 w-3" /><span>Target: {formatTime(latestPred?.target_time)}</span></div>
-                      {latestPred?.price_at_prediction && (
-                        <div className="flex items-center gap-1.5"><span className="text-zinc-500">Entry:</span><span className="text-white font-mono font-semibold">${formatPrice(latestPred.price_at_prediction)}</span></div>
+
+                    {/* Time info */}
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-zinc-400">
+                      <span className="flex items-center gap-1"><Clock className="h-2.5 w-2.5" /> {fmtTime(pred?.prediction_time || pred?.created_at)}</span>
+                      <span className="flex items-center gap-1"><Target className="h-2.5 w-2.5" /> Target: {fmtTime(pred?.target_time)}</span>
+                      {pred?.price_at_prediction && (
+                        <span className="text-zinc-500">Entry: <span className="text-white font-mono font-semibold">${fmtPrice(pred.price_at_prediction)}</span></span>
                       )}
                     </div>
-                    {latestPred?.indicator_params?.signals && Array.isArray(latestPred.indicator_params.signals) && latestPred.indicator_params.signals.length > 0 && (
-                      <div className="space-y-1.5">
-                        <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Signal Breakdown</span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {(latestPred.indicator_params.signals as SignalDetail[]).map((signal, i) => (
-                            <Badge key={`${signal.name}-${i}`} variant="outline"
-                              className={`text-[10px] font-medium border-0 ${signal.type === 'bullish' ? 'bg-emerald-500/15 text-emerald-400' : signal.type === 'bearish' ? 'bg-red-500/15 text-red-400' : 'bg-zinc-700/50 text-zinc-400'}`}>
-                              {signal.type === 'bullish' ? <TrendingUp className="h-2.5 w-2.5 mr-1" /> : signal.type === 'bearish' ? <TrendingDown className="h-2.5 w-2.5 mr-1" /> : <Minus className="h-2.5 w-2.5 mr-1" />}
-                              {signal.name}<span className="ml-1 opacity-60">{(signal.strength * 100).toFixed(0)}%</span>
-                            </Badge>
-                          ))}
-                        </div>
+
+                    {/* Signal badges */}
+                    {pred?.indicator_params?.signals && Array.isArray(pred.indicator_params.signals) && pred.indicator_params.signals.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(pred.indicator_params.signals as SignalDetail[]).map((sig, i) => (
+                          <Badge key={`${sig.name}-${i}`} variant="outline"
+                            className={`text-[9px] font-medium border-0 px-2 py-0.5 ${sig.type === 'bullish' ? 'bg-emerald-500/10 text-emerald-400' : sig.type === 'bearish' ? 'bg-red-500/10 text-red-400' : 'bg-zinc-700/30 text-zinc-400'}`}>
+                            {sig.type === 'bullish' ? <TrendingUp className="h-2.5 w-2.5 mr-0.5" /> : sig.type === 'bearish' ? <TrendingDown className="h-2.5 w-2.5 mr-0.5" /> : <Minus className="h-2.5 w-2.5 mr-0.5" />}
+                            {sig.name}
+                          </Badge>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -537,198 +478,155 @@ export default function Home() {
             </CardContent>
           </Card>
 
-          {/* Performance Stats Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          {/* Stats Row */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {state.loading ? (
-              Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24 bg-zinc-900 rounded-xl" />)
+              Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 bg-zinc-900 rounded-xl" />)
             ) : (
               <>
-                <StatCard title="Total Predictions" value={perf?.total ?? 0} subtitle={`${perf?.wins ?? 0}W / ${perf?.losses ?? 0}L`} icon={BarChart3} />
-                <Card className="bg-zinc-900/80 border-zinc-800/60 backdrop-blur-sm hover:border-zinc-700/60 transition-colors">
-                  <CardContent className="p-4 flex items-center gap-3">
-                    <div className="relative flex items-center justify-center">
-                      <CircularProgress value={perf ? perf.winRate * 100 : 0} size={56} strokeWidth={4} color={perf && perf.winRate >= 0.5 ? BULLISH_COLOR : BEARISH_COLOR} />
-                      <span className="absolute text-[10px] font-bold text-white">{perf ? `${(perf.winRate * 100).toFixed(0)}` : '0'}</span>
+                {/* Win Rate */}
+                <Card className="bg-zinc-900/60 border-zinc-800/40">
+                  <CardContent className="p-3 flex items-center gap-2.5">
+                    <div className="relative flex items-center justify-center flex-shrink-0">
+                      <Ring value={perf ? perf.winRate * 100 : 0} size={44} sw={3} color={perf && perf.winRate >= 0.5 ? BULL : BEAR} />
+                      <span className="absolute text-[9px] font-bold text-white">{perf ? `${(perf.winRate * 100).toFixed(0)}` : '0'}</span>
                     </div>
                     <div>
-                      <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider block">Win Rate</span>
-                      <span className={`text-xl font-bold transition-colors duration-300 ${perf && perf.winRate >= 0.5 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Win Rate</span>
+                      <span className={`text-lg font-bold ${perf && perf.winRate >= 0.5 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {perf ? `${(perf.winRate * 100).toFixed(1)}%` : '---'}
                       </span>
                     </div>
                   </CardContent>
                 </Card>
-                <StatCard title="Current Streak" value={streakCount > 0 ? `${streakCount}` : '0'}
-                  subtitle={streakType === 'win' ? 'Win Streak' : streakType === 'loss' ? 'Loss Streak' : 'No Streak'}
-                  icon={streakType === 'win' ? TrendingUp : streakType === 'loss' ? TrendingDown : Minus}
-                  color={streakType === 'win' ? BULLISH_COLOR : streakType === 'loss' ? BEARISH_COLOR : undefined} />
-                <StatCard title="Avg Confidence" value={perf ? `${(perf.avgConfidence * 100).toFixed(1)}%` : '---'} subtitle="Across all predictions" icon={Target} />
-                <StatCard title="24h Win Rate" value={perf ? `${(perf.recentWinRate * 100).toFixed(1)}%` : '---'} subtitle="Recent performance" icon={Clock}
-                  color={perf && perf.recentWinRate >= 0.5 ? BULLISH_COLOR : perf && perf.recentWinRate < 0.5 ? BEARISH_COLOR : undefined} />
-                <StatCard title="Total Wins" value={perf?.wins ?? 0} subtitle={`of ${perf?.total ?? 0} evaluated`} icon={CheckCircle2}
-                  color={perf && perf.wins > perf.losses ? BULLISH_COLOR : undefined} />
+
+                {/* Total */}
+                <Card className="bg-zinc-900/60 border-zinc-800/40">
+                  <CardContent className="p-3">
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Total</span>
+                    <span className="text-lg font-bold text-white">{perf?.total ?? 0}</span>
+                    <span className="text-[10px] text-zinc-500 ml-1.5">{perf?.wins ?? 0}W {perf?.losses ?? 0}L</span>
+                  </CardContent>
+                </Card>
+
+                {/* Streak */}
+                <Card className="bg-zinc-900/60 border-zinc-800/40">
+                  <CardContent className="p-3">
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Streak</span>
+                    <div className="flex items-center gap-1">
+                      {streakType === 'win' ? <TrendingUp className="h-4 w-4 text-emerald-400" /> : streakType === 'loss' ? <TrendingDown className="h-4 w-4 text-red-400" /> : <Minus className="h-4 w-4 text-zinc-600" />}
+                      <span className={`text-lg font-bold ${streakType === 'win' ? 'text-emerald-400' : streakType === 'loss' ? 'text-red-400' : 'text-zinc-400'}`}>{streakN}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Avg Confidence */}
+                <Card className="bg-zinc-900/60 border-zinc-800/40">
+                  <CardContent className="p-3">
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Avg Confidence</span>
+                    <span className="text-lg font-bold text-white">{perf ? `${(perf.avgConfidence * 100).toFixed(1)}%` : '---'}</span>
+                  </CardContent>
+                </Card>
               </>
             )}
           </div>
 
-          {/* Indicator Config + Win Rate Chart */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Indicator Config Card */}
-            <Card className="bg-zinc-900/70 border-zinc-800/50 backdrop-blur-sm h-full">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Settings2 className="h-4 w-4 text-amber-400" />
-                    <CardTitle className="text-sm font-semibold text-zinc-200">Indicator Configuration</CardTitle>
-                  </div>
-                  <Badge variant="outline" className="text-[10px] border-0 bg-emerald-500/15 text-emerald-400">StochRSI + MA</Badge>
-                </div>
-                <CardDescription className="text-zinc-500 text-xs">
-                  Fixed parameters for StochRSI and MA-StochRSI analysis • 30min timeframe
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-4 gap-2">
-                  <ConfigBox label="RSI Period" value={INDICATOR_CONFIG.rsi_period} />
-                  <ConfigBox label="Stoch Period" value={INDICATOR_CONFIG.stoch_period} />
-                  <ConfigBox label="K Smooth" value={INDICATOR_CONFIG.k_smooth} />
-                  <ConfigBox label="D Smooth" value={INDICATOR_CONFIG.d_smooth} />
-                </div>
-                <div className="grid grid-cols-4 gap-2">
-                  <ConfigBox label="MA Type" value={INDICATOR_CONFIG.ma_type} />
-                  <ConfigBox label="MA Period" value={INDICATOR_CONFIG.ma_period} />
-                  <ConfigBox label="Overbought" value={INDICATOR_CONFIG.overbought} />
-                  <ConfigBox label="Oversold" value={INDICATOR_CONFIG.oversold} />
-                </div>
-                <Separator className="bg-zinc-800" />
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-zinc-400">StochRSI Weight</span>
-                    <span className="text-xs font-mono text-emerald-400">{INDICATOR_CONFIG.stochrsi_weight}</span>
-                  </div>
-                  <Progress value={60} className="h-1.5 bg-zinc-800" />
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-zinc-400">MA Weight</span>
-                    <span className="text-xs font-mono text-amber-400">{INDICATOR_CONFIG.ma_weight}</span>
-                  </div>
-                  <Progress value={40} className="h-1.5 bg-zinc-800" />
-                </div>
-                <Separator className="bg-zinc-800" />
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-zinc-800/50 rounded-lg px-3 py-2">
-                    <span className="text-[10px] text-zinc-500 block">Overbought Zone</span>
-                    <span className="text-xs font-mono text-red-400">StochRSI %K &ge; 80</span>
-                  </div>
-                  <div className="bg-zinc-800/50 rounded-lg px-3 py-2">
-                    <span className="text-[10px] text-zinc-500 block">Oversold Zone</span>
-                    <span className="text-xs font-mono text-emerald-400">StochRSI %K &le; 20</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
+          {/* Chart + History */}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
             {/* Win Rate Chart */}
-            <Card className="bg-zinc-900/70 border-zinc-800/50 backdrop-blur-sm h-full">
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-emerald-400" />
-                  <CardTitle className="text-sm font-semibold text-zinc-200">Win Rate Over Time</CardTitle>
+            <Card className="bg-zinc-900/60 border-zinc-800/40 lg:col-span-2">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-1.5 mb-3">
+                  <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
+                  <span className="text-xs font-semibold text-zinc-300">Win Rate</span>
                 </div>
-                <CardDescription className="text-zinc-500 text-xs">Cumulative win rate across evaluated predictions</CardDescription>
-              </CardHeader>
-              <CardContent>
                 {state.loading ? (
-                  <div className="h-[280px] flex items-center justify-center"><Loader2 className="h-6 w-6 text-zinc-700 animate-spin" /></div>
+                  <div className="h-[220px] flex items-center justify-center"><Loader2 className="h-5 w-5 text-zinc-700 animate-spin" /></div>
                 ) : state.winRateHistory.length > 1 ? (
                   <RechartsAreaChart data={state.winRateHistory} />
                 ) : (
-                  <div className="h-[280px] flex items-center justify-center text-zinc-600 text-sm">
+                  <div className="h-[220px] flex items-center justify-center text-zinc-600 text-xs">
                     <div className="text-center">
-                      <BarChart3 className="h-10 w-10 mx-auto mb-2 text-zinc-700" />
-                      <p>Not enough data for chart</p>
-                      <p className="text-xs text-zinc-700 mt-1">Win rate chart appears after evaluations</p>
+                      <BarChart3 className="h-8 w-8 mx-auto mb-1.5 text-zinc-700" />
+                      <p>Need more data</p>
                     </div>
                   </div>
                 )}
               </CardContent>
             </Card>
+
+            {/* Prediction History */}
+            <Card className="bg-zinc-900/60 border-zinc-800/40 lg:col-span-3">
+              <CardContent className="p-0">
+                <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Activity className="h-3.5 w-3.5 text-zinc-400" />
+                    <span className="text-xs font-semibold text-zinc-300">History</span>
+                  </div>
+                  {state.predictions && (
+                    <span className="text-[10px] text-zinc-600">{state.predictions.total} total</span>
+                  )}
+                </div>
+                {state.loading ? (
+                  <div className="p-4 space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full bg-zinc-800 rounded" />)}</div>
+                ) : (
+                  <ScrollArea className="max-h-[280px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-zinc-800/40 hover:bg-transparent">
+                          <TableHead className="text-[9px] text-zinc-500 uppercase tracking-wider font-semibold h-8 py-1">Time</TableHead>
+                          <TableHead className="text-[9px] text-zinc-500 uppercase tracking-wider font-semibold h-8 py-1">Dir</TableHead>
+                          <TableHead className="text-[9px] text-zinc-500 uppercase tracking-wider font-semibold h-8 py-1">Conf</TableHead>
+                          <TableHead className="text-[9px] text-zinc-500 uppercase tracking-wider font-semibold h-8 py-1 hidden sm:table-cell">K/D</TableHead>
+                          <TableHead className="text-[9px] text-zinc-500 uppercase tracking-wider font-semibold h-8 py-1">Result</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {state.predictions?.predictions && state.predictions.predictions.length > 0 ? (
+                          state.predictions.predictions.map((p, i) => {
+                            const out = p.outcome || (p.outcomes?.result) || 'PENDING'
+                            const isW = out === 'WIN'
+                            const isL = out === 'LOSS'
+                            const isUp = p.direction === 'UP'
+                            return (
+                              <TableRow key={p.id || i}
+                                className={`border-zinc-800/30 text-xs ${isW ? 'bg-emerald-500/[0.03]' : isL ? 'bg-red-500/[0.03]' : ''}`}>
+                                <TableCell className="text-[11px] text-zinc-400 font-mono py-2">{fmtDT(p.prediction_time || p.created_at)}</TableCell>
+                                <TableCell>
+                                  <span className={`text-[10px] font-semibold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    {isUp ? '↑' : '↓'} {p.direction}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-[11px] font-mono text-zinc-300 py-2">{p.confidence}%</TableCell>
+                                <TableCell className="text-[11px] font-mono text-zinc-500 py-2 hidden sm:table-cell">{p.stochrsi_k?.toFixed(0) ?? '--'}/{p.stochrsi_d?.toFixed(0) ?? '--'}</TableCell>
+                                <TableCell>
+                                  {isW ? <span className="text-emerald-400 text-[10px] font-semibold">WIN</span> :
+                                   isL ? <span className="text-red-400 text-[10px] font-semibold">LOSS</span> :
+                                   <span className="text-zinc-500 text-[10px]">PENDING</span>}
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={5} className="text-center py-10 text-zinc-600 text-xs">
+                              <Activity className="h-6 w-6 mx-auto mb-1.5 text-zinc-700" />
+                              No predictions yet — click Predict to start
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
-          {/* Prediction History Table */}
-          <Card className="bg-zinc-900/70 border-zinc-800/50 backdrop-blur-sm">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-zinc-400" />
-                  <CardTitle className="text-sm font-semibold text-zinc-200">Prediction History</CardTitle>
-                </div>
-                {state.predictions && (
-                  <Badge variant="outline" className="text-[10px] border-zinc-700 text-zinc-400">{state.predictions.total} total</Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              {state.loading ? (
-                <div className="p-6 space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10 w-full bg-zinc-800 rounded-lg" />)}</div>
-              ) : (
-                <ScrollArea className="max-h-[420px]">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-zinc-800/60 hover:bg-transparent">
-                        <TableHead className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Time</TableHead>
-                        <TableHead className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Direction</TableHead>
-                        <TableHead className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Confidence</TableHead>
-                        <TableHead className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold hidden sm:table-cell">StochRSI K/D</TableHead>
-                        <TableHead className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold hidden md:table-cell">Price</TableHead>
-                        <TableHead className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Outcome</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {state.predictions?.predictions && state.predictions.predictions.length > 0 ? (
-                        state.predictions.predictions.map((pred, i) => {
-                          const outcome = pred.outcome || (pred.outcomes?.result) || 'PENDING'
-                          const isWin = outcome === 'WIN'
-                          const isLoss = outcome === 'LOSS'
-                          const isUpDir = pred.direction === 'UP'
-                          return (
-                            <TableRow key={pred.id || i}
-                              className={`border-zinc-800/40 transition-colors ${isWin ? 'bg-emerald-500/[0.04] hover:bg-emerald-500/[0.08]' : isLoss ? 'bg-red-500/[0.04] hover:bg-red-500/[0.08]' : 'hover:bg-zinc-800/40'}`}>
-                              <TableCell className="text-xs text-zinc-400 font-mono py-2.5">{formatDateTime(pred.prediction_time || pred.created_at)}</TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className={`text-[10px] font-semibold border-0 ${isUpDir ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>
-                                  {isUpDir ? <ChevronUp className="h-3 w-3 mr-0.5" /> : <ChevronDown className="h-3 w-3 mr-0.5" />}{pred.direction}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-xs font-mono text-zinc-300 py-2.5">{pred.confidence}%</TableCell>
-                              <TableCell className="text-xs font-mono text-zinc-400 py-2.5 hidden sm:table-cell">{pred.stochrsi_k?.toFixed(1) ?? '--'} / {pred.stochrsi_d?.toFixed(1) ?? '--'}</TableCell>
-                              <TableCell className="text-xs font-mono text-zinc-400 py-2.5 hidden md:table-cell">${formatPrice(pred.price_at_prediction ?? null)}</TableCell>
-                              <TableCell>
-                                {isWin ? <Badge className="bg-emerald-500/15 text-emerald-400 border-0 text-[10px] font-semibold"><CheckCircle2 className="h-3 w-3 mr-1" /> WIN</Badge> :
-                                 isLoss ? <Badge className="bg-red-500/15 text-red-400 border-0 text-[10px] font-semibold"><XCircle className="h-3 w-3 mr-1" /> LOSS</Badge> :
-                                 <Badge className="bg-zinc-700/30 text-zinc-400 border-0 text-[10px] font-semibold"><Clock className="h-3 w-3 mr-1" /> PENDING</Badge>}
-                              </TableCell>
-                            </TableRow>
-                          )
-                        })
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={6} className="text-center py-12 text-zinc-600">
-                            <Activity className="h-8 w-8 mx-auto mb-2 text-zinc-700" />
-                            <p className="text-sm">No predictions yet</p>
-                            <p className="text-xs text-zinc-700 mt-1">Click &quot;New Prediction&quot; to get started</p>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
-              )}
-            </CardContent>
-          </Card>
-
-          <footer className="pt-4 pb-6 text-center">
-            <p className="text-[11px] text-zinc-600">BTC Binary Trading Prediction Agent • Auto-refreshes every 30s • StochRSI + MA-StochRSI Indicators</p>
-          </footer>
+          {/* Footer */}
+          <div className="pt-2 pb-6 text-center">
+            <p className="text-[10px] text-zinc-700">BTC Prediction Agent — StochRSI + MA-StochRSI — 30min timeframe</p>
+          </div>
         </main>
       </div>
     </TooltipProvider>

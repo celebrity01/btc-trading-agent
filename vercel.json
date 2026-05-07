@@ -2,11 +2,11 @@
   "crons": [
     {
       "path": "/api/cron/fetch-and-predict",
-      "schedule": "0 0 * * *"
+      "schedule": "0,30 * * * *"
     },
     {
       "path": "/api/cron/evaluate",
-      "schedule": "30 0 * * *"
+      "schedule": "15,45 * * * *"
     }
   ],
   "headers": [
