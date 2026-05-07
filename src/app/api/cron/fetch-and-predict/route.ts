@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { fetchKlines, fetchLatestPrice } from '@/lib/mexc';
-import { generatePrediction } from '@/lib/prediction/engine';
-import { getActiveLearningParams } from '@/lib/learning/optimizer';
+import { generatePrediction, DEFAULT_CONFIG } from '@/lib/prediction/engine';
 import type { Candle, Prediction } from '@/lib/supabase';
 
 // ---------------------------------------------------------------------------
@@ -50,7 +49,7 @@ export async function GET(request: NextRequest) {
     }
 
     // ------------------------------------------------------------------
-    // 2. Upsert candles into Supabase (unique on symbol + timeframe + open_time)
+    // 2. Upsert candles into Supabase
     // ------------------------------------------------------------------
     const supabase = createServerClient();
 
@@ -71,39 +70,33 @@ export async function GET(request: NextRequest) {
 
     if (upsertError) {
       console.error('[fetch-and-predict] Candle upsert error:', upsertError.message);
-      // Non-fatal – continue with prediction using the data we have
     }
 
     // ------------------------------------------------------------------
-    // 3. Get current active learning params
-    // ------------------------------------------------------------------
-    const params = await getActiveLearningParams();
-
-    // ------------------------------------------------------------------
-    // 4. Extract closing prices from candles (already sorted by Mexc)
+    // 3. Extract closing prices
     // ------------------------------------------------------------------
     const closes = candles.map((c) => c.close);
 
     // ------------------------------------------------------------------
-    // 5. Fetch current BTC price
+    // 4. Fetch current BTC price
     // ------------------------------------------------------------------
     const { price: currentPrice } = await fetchLatestPrice(SYMBOL);
 
     // ------------------------------------------------------------------
-    // 6. Generate prediction using the prediction engine
+    // 5. Generate prediction using fixed indicator config
     // ------------------------------------------------------------------
     const predictionResult = generatePrediction({
       closes,
       currentPrice,
       symbol: SYMBOL,
       timeframe: TIMEFRAME,
-      params,
+      config: DEFAULT_CONFIG,
     });
 
     // ------------------------------------------------------------------
-    // 7. Save the prediction to Supabase
+    // 6. Save the prediction to Supabase
     // ------------------------------------------------------------------
-    const targetTime = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 minutes from now
+    const targetTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
     const predictionRow: Omit<Prediction, 'id' | 'created_at'> = {
       symbol: SYMBOL,
@@ -136,7 +129,7 @@ export async function GET(request: NextRequest) {
     }
 
     // ------------------------------------------------------------------
-    // 8. Return the prediction as JSON
+    // 7. Return the prediction
     // ------------------------------------------------------------------
     return NextResponse.json({
       success: true,

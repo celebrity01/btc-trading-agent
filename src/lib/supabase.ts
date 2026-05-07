@@ -47,39 +47,6 @@ export interface Outcome {
   created_at?: string;
 }
 
-export interface ModelPerformance {
-  id?: number;
-  total_predictions: number;
-  total_wins: number;
-  total_losses: number;
-  win_rate: number;
-  avg_confidence: number;
-  last_7d_win_rate: number;
-  last_24h_win_rate: number;
-  recorded_at?: string;
-}
-
-export interface LearningParams {
-  id?: number;
-  rsi_period: number;
-  stoch_period: number;
-  k_smooth: number;
-  d_smooth: number;
-  ma_type: string;
-  ma_period: number;
-  overbought_threshold: number;
-  oversold_threshold: number;
-  confidence_weight_stochrsi: number;
-  confidence_weight_ma: number;
-  win_streak_adjustment: number;
-  loss_streak_adjustment: number;
-  total_predictions: number;
-  total_wins: number;
-  performance_score: number;
-  updated_at?: string;
-  is_active: boolean;
-}
-
 // ---------------------------------------------------------------------------
 // Supabase client helpers
 // ---------------------------------------------------------------------------

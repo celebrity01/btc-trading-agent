@@ -1,5 +1,36 @@
 import { calculateStochRSI, calculateMAStochRSI } from '../indicators';
-import type { LearningParams, Prediction } from '../supabase';
+import type { Prediction } from '../supabase';
+
+// ---------------------------------------------------------------------------
+// Fixed indicator configuration (no learning/adaptation)
+// ---------------------------------------------------------------------------
+
+export interface IndicatorConfig {
+  rsi_period: number;
+  stoch_period: number;
+  k_smooth: number;
+  d_smooth: number;
+  ma_type: 'SMA' | 'EMA';
+  ma_period: number;
+  overbought_threshold: number;
+  oversold_threshold: number;
+  confidence_weight_stochrsi: number;
+  confidence_weight_ma: number;
+}
+
+/** Default StochRSI + MA-StochRSI parameters — well-tested standard values */
+export const DEFAULT_CONFIG: IndicatorConfig = {
+  rsi_period: 14,
+  stoch_period: 14,
+  k_smooth: 3,
+  d_smooth: 3,
+  ma_type: 'SMA',
+  ma_period: 3,
+  overbought_threshold: 80,
+  oversold_threshold: 20,
+  confidence_weight_stochrsi: 0.60,
+  confidence_weight_ma: 0.40,
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -10,7 +41,7 @@ export interface PredictionInput {
   currentPrice: number;
   symbol: string;
   timeframe: string;
-  params: LearningParams;
+  config?: IndicatorConfig;
 }
 
 export interface PredictionResult {
@@ -35,38 +66,23 @@ export interface SignalDetail {
 // Helper: Analyze StochRSI zone
 // ---------------------------------------------------------------------------
 
-/**
- * Determines which zone the StochRSI indicator is in and how deep.
- *
- * @param k - StochRSI %K value
- * @param d - StochRSI %D value
- * @param overbought - Overbought threshold (e.g. 80)
- * @param oversold - Oversold threshold (e.g. 20)
- * @returns The current zone and a 0-1 strength indicating how deep into the zone
- */
 export function analyzeStochRSIZone(
   k: number,
   d: number,
   overbought: number,
   oversold: number
 ): { zone: 'overbought' | 'oversold' | 'neutral'; strength: number } {
-  // Use %K as the primary zone indicator
   if (k <= oversold) {
-    // Deeper into oversold = lower %K = stronger signal
-    // At %K=0 strength=1, at %K=oversold strength=0
     const strength = oversold === 0 ? 1 : Math.min(1, (oversold - k) / oversold);
     return { zone: 'oversold', strength };
   }
 
   if (k >= overbought) {
-    // Deeper into overbought = higher %K = stronger signal
-    // At %K=100 strength=1, at %K=overbought strength=0
     const range = 100 - overbought;
     const strength = range === 0 ? 1 : Math.min(1, (k - overbought) / range);
     return { zone: 'overbought', strength };
   }
 
-  // Neutral zone — strength reflects how close to a boundary
   const distToOversold = k - oversold;
   const distToOverbought = overbought - k;
   const neutralRange = overbought - oversold;
@@ -79,27 +95,18 @@ export function analyzeStochRSIZone(
 // Helper: Crossover detection
 // ---------------------------------------------------------------------------
 
-/**
- * Detects %K / %D crossovers and measures their strength based on the
- * magnitude of the cross (distance between %K and %D after crossing).
- *
- * @returns The crossover type and a 0-1 strength value
- */
 export function calculateCrossoverStrength(
   prevK: number,
   prevD: number,
   currK: number,
   currD: number
 ): { type: 'bullish' | 'bearish' | 'none'; strength: number } {
-  // Check for bullish crossover: %K was below %D, now above
   if (prevK <= prevD && currK > currD) {
     const magnitude = Math.abs(currK - currD);
-    // Normalize: a 10-point cross is already notable, 30+ is very strong
     const strength = Math.min(1, magnitude / 30);
     return { type: 'bullish', strength };
   }
 
-  // Check for bearish crossover: %K was above %D, now below
   if (prevK >= prevD && currK < currD) {
     const magnitude = Math.abs(currD - currK);
     const strength = Math.min(1, magnitude / 30);
@@ -120,10 +127,6 @@ function getLastValid(arr: number[]): number | null {
   return null;
 }
 
-/**
- * Get the second-to-last valid value from an array (for crossover detection).
- * Skips the most recent valid value and returns the one before it.
- */
 function getSecondLastValid(arr: number[]): number | null {
   let count = 0;
   for (let i = arr.length - 1; i >= 0; i--) {
@@ -139,26 +142,15 @@ function getSecondLastValid(arr: number[]): number | null {
 // Main function: generatePrediction
 // ---------------------------------------------------------------------------
 
-/**
- * Core prediction engine that combines StochRSI and MA-StochRSI indicators
- * to generate binary UP/DOWN predictions with confidence scores.
- *
- * Algorithm overview:
- * 1. Calculate StochRSI from closing prices using learning params
- * 2. Calculate MA-StochRSI from StochRSI output
- * 3. Generate trading signals from indicator analysis
- * 4. Determine direction from signal consensus
- * 5. Calculate confidence from signal agreement and indicator extremes
- * 6. Return full PredictionResult
- */
 export function generatePrediction(input: PredictionInput): PredictionResult {
-  const { closes, currentPrice, symbol, timeframe, params } = input;
+  const config = input.config ?? DEFAULT_CONFIG;
+  const { closes, currentPrice, symbol, timeframe } = input;
 
   // -----------------------------------------------------------------------
   // Edge case: not enough closing price data
   // -----------------------------------------------------------------------
   const minDataPoints =
-    params.rsi_period + 1 + params.stoch_period - 1 + params.k_smooth - 1 + params.d_smooth - 1;
+    config.rsi_period + 1 + config.stoch_period - 1 + config.k_smooth - 1 + config.d_smooth - 1;
 
   if (closes.length < minDataPoints) {
     return {
@@ -176,7 +168,7 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
           description: `Need at least ${minDataPoints} data points, got ${closes.length}`,
         },
       ],
-      indicator_params: buildIndicatorParams(params),
+      indicator_params: buildIndicatorParams(config),
     };
   }
 
@@ -185,25 +177,25 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
   // -----------------------------------------------------------------------
   const stochRSI = calculateStochRSI(
     closes,
-    params.rsi_period,
-    params.stoch_period,
-    params.k_smooth,
-    params.d_smooth
+    config.rsi_period,
+    config.stoch_period,
+    config.k_smooth,
+    config.d_smooth
   );
 
   // -----------------------------------------------------------------------
   // Step 2: Calculate MA-StochRSI
   // -----------------------------------------------------------------------
-  const maType = (params.ma_type?.toUpperCase() === 'EMA' ? 'EMA' : 'SMA') as 'SMA' | 'EMA';
+  const maType = config.ma_type;
   const maStochRSI = calculateMAStochRSI(
     stochRSI.k,
     stochRSI.d,
     maType,
-    params.ma_period
+    config.ma_period
   );
 
   // -----------------------------------------------------------------------
-  // Extract latest indicator values (last valid entries)
+  // Extract latest indicator values
   // -----------------------------------------------------------------------
   const latestK = getLastValid(stochRSI.k);
   const latestD = getLastValid(stochRSI.d);
@@ -215,7 +207,6 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
   const prevMAK = getSecondLastValid(maStochRSI.ma_k);
   const prevMAD = getSecondLastValid(maStochRSI.ma_d);
 
-  // Fallback if indicators couldn't be computed
   if (latestK === null || latestD === null) {
     return {
       direction: 'UP',
@@ -232,11 +223,10 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
           description: 'StochRSI could not be computed with the given data and parameters',
         },
       ],
-      indicator_params: buildIndicatorParams(params),
+      indicator_params: buildIndicatorParams(config),
     };
   }
 
-  // Use safe defaults for previous values if unavailable
   const safePrevK = prevK ?? latestK;
   const safePrevD = prevD ?? latestD;
   const safeLatestMAK = latestMAK ?? latestK;
@@ -244,15 +234,15 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
   const safePrevMAK = prevMAK ?? safeLatestMAK;
   const safePrevMAD = prevMAD ?? safeLatestMAD;
 
-  const overbought = params.overbought_threshold;
-  const oversold = params.oversold_threshold;
+  const overbought = config.overbought_threshold;
+  const oversold = config.oversold_threshold;
 
   // -----------------------------------------------------------------------
   // Step 3: Generate Signals
   // -----------------------------------------------------------------------
   const signals: SignalDetail[] = [];
 
-  // --- Signal A: StochRSI Crossover ---
+  // Signal A: StochRSI Crossover
   const crossover = calculateCrossoverStrength(safePrevK, safePrevD, latestK, latestD);
   if (crossover.type !== 'none') {
     signals.push({
@@ -266,7 +256,7 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
     });
   }
 
-  // --- Signal B: Overbought / Oversold Zone ---
+  // Signal B: Overbought / Oversold Zone
   const zone = analyzeStochRSIZone(latestK, latestD, overbought, oversold);
   if (zone.zone === 'oversold') {
     signals.push({
@@ -284,7 +274,7 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
     });
   }
 
-  // --- Signal C: MA-StochRSI Confirmation ---
+  // Signal C: MA-StochRSI Confirmation
   const stochrsiDirection: 'up' | 'down' | 'flat' =
     latestK > latestD ? 'up' : latestK < latestD ? 'down' : 'flat';
   const maDirection: 'up' | 'down' | 'flat' =
@@ -292,7 +282,6 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
 
   if (stochrsiDirection !== 'flat' && maDirection !== 'flat') {
     if (stochrsiDirection === maDirection) {
-      // Alignment — adds confidence
       const alignmentStrength = Math.min(
         Math.abs(safeLatestMAK - safeLatestMAD) / 20,
         1
@@ -307,10 +296,9 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
             : `MA-StochRSI confirms bearish: MA-%K (${safeLatestMAK.toFixed(2)}) below MA-%D (${safeLatestMAD.toFixed(2)})`,
       });
     } else {
-      // Divergence — reduces confidence (neutral signal with opposing direction strength)
       const divergenceStrength = Math.min(
         Math.abs(safeLatestMAK - safeLatestMAD) / 20,
-        0.5 // Cap divergence at 0.5 so it doesn't overpower
+        0.5
       );
       signals.push({
         name: 'MA-StochRSI Divergence',
@@ -324,12 +312,10 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
     }
   }
 
-  // --- Signal D: Zone Re-entry ---
-  // Previous bar was in oversold/overbought zone, current is in neutral
+  // Signal D: Zone Re-entry
   const prevZone = analyzeStochRSIZone(safePrevK, safePrevD, overbought, oversold);
 
   if (prevZone.zone === 'oversold' && zone.zone === 'neutral') {
-    // Just exited oversold — strong bullish re-entry
     const reentryStrength = Math.min(
       (latestK - oversold) / (overbought - oversold) * 2,
       1
@@ -341,7 +327,6 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
       description: `StochRSI crossed back from oversold zone into neutral: %K moved from ${safePrevK.toFixed(2)} to ${latestK.toFixed(2)}`,
     });
   } else if (prevZone.zone === 'overbought' && zone.zone === 'neutral') {
-    // Just exited overbought — strong bearish re-entry
     const reentryStrength = Math.min(
       (overbought - latestK) / (overbought - oversold) * 2,
       1
@@ -366,7 +351,6 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
     } else if (signal.type === 'bearish') {
       bearishScore += signal.strength;
     }
-    // Neutral signals don't affect direction
   }
 
   const totalScore = bullishScore - bearishScore;
@@ -375,53 +359,44 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
   // -----------------------------------------------------------------------
   // Step 5: Calculate Confidence (0-100)
   // -----------------------------------------------------------------------
-
-  // Base confidence: signal agreement ratio
   const totalSignalStrength = bullishScore + bearishScore;
   const dominantScore = direction === 'UP' ? bullishScore : bearishScore;
   const agreementRatio = totalSignalStrength > 0 ? dominantScore / totalSignalStrength : 0.5;
 
-  // Count how many signals agree with the direction
   const agreeingSignals = signals.filter(
     (s) => s.type === (direction === 'UP' ? 'bullish' : 'bearish')
   ).length;
   const totalSignals = signals.filter((s) => s.type !== 'neutral').length;
   const signalAgreement = totalSignals > 0 ? agreeingSignals / totalSignals : 0.5;
 
-  // Combine agreement measures
   let confidence = (agreementRatio * 0.5 + signalAgreement * 0.5) * 100;
 
-  // Apply confidence weights from learning params
-  const weightStochRSI = params.confidence_weight_stochrsi;
-  const weightMA = params.confidence_weight_ma;
+  // Apply confidence weights from config
+  const weightStochRSI = config.confidence_weight_stochrsi;
+  const weightMA = config.confidence_weight_ma;
 
-  // StochRSI conviction: how far %K is from the neutral 50
-  const stochrsiConviction = Math.abs(latestK - 50) / 50; // 0 to 1
+  const stochrsiConviction = Math.abs(latestK - 50) / 50;
   confidence *= (1 + stochrsiConviction * weightStochRSI * 0.3);
 
-  // MA-StochRSI conviction: how far MA-%K is from the neutral 50
-  const maConviction = Math.abs(safeLatestMAK - 50) / 50; // 0 to 1
+  const maConviction = Math.abs(safeLatestMAK - 50) / 50;
   confidence *= (1 + maConviction * weightMA * 0.2);
 
-  // Crossover bonus: if there's a fresh crossover, boost confidence
   if (crossover.type !== 'none') {
     confidence += crossover.strength * 10;
   }
 
-  // Extreme values bonus: near 0 or 100 on StochRSI
   if (latestK <= 5 || latestK >= 95) {
     confidence += 5;
   } else if (latestK <= 10 || latestK >= 90) {
     confidence += 3;
   }
 
-  // Clamp to 30-95 range
   confidence = Math.max(30, Math.min(95, Math.round(confidence)));
 
   // -----------------------------------------------------------------------
   // Step 6: Build indicator_params
   // -----------------------------------------------------------------------
-  const indicator_params = buildIndicatorParams(params);
+  const indicator_params = buildIndicatorParams(config);
 
   // -----------------------------------------------------------------------
   // Step 7: Return PredictionResult
@@ -442,17 +417,17 @@ export function generatePrediction(input: PredictionInput): PredictionResult {
 // Helper: Build indicator_params record
 // ---------------------------------------------------------------------------
 
-function buildIndicatorParams(params: LearningParams): Record<string, any> {
+function buildIndicatorParams(config: IndicatorConfig): Record<string, any> {
   return {
-    rsi_period: params.rsi_period,
-    stoch_period: params.stoch_period,
-    k_smooth: params.k_smooth,
-    d_smooth: params.d_smooth,
-    ma_type: params.ma_type,
-    ma_period: params.ma_period,
-    overbought_threshold: params.overbought_threshold,
-    oversold_threshold: params.oversold_threshold,
-    confidence_weight_stochrsi: params.confidence_weight_stochrsi,
-    confidence_weight_ma: params.confidence_weight_ma,
+    rsi_period: config.rsi_period,
+    stoch_period: config.stoch_period,
+    k_smooth: config.k_smooth,
+    d_smooth: config.d_smooth,
+    ma_type: config.ma_type,
+    ma_period: config.ma_period,
+    overbought_threshold: config.overbought_threshold,
+    oversold_threshold: config.oversold_threshold,
+    confidence_weight_stochrsi: config.confidence_weight_stochrsi,
+    confidence_weight_ma: config.confidence_weight_ma,
   };
 }

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "BTC Binary Trading Agent — Live Prediction Dashboard",
-  description: "Real-time BTC/USDT binary trading prediction agent with StochRSI analysis and adaptive learning parameters.",
+  description: "Real-time BTC/USDT binary trading prediction agent powered by StochRSI and MA-StochRSI indicators.",
   keywords: ["BTC", "Bitcoin", "Trading", "Prediction", "StochRSI", "AI Agent", "Binary Options"],
   authors: [{ name: "BTC Trading Agent" }],
   icons: {
@@ -23,13 +23,13 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "BTC Binary Trading Agent",
-    description: "Live prediction dashboard with adaptive learning",
+    description: "Live prediction dashboard with StochRSI + MA-StochRSI indicators",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
     title: "BTC Binary Trading Agent",
-    description: "Live prediction dashboard with adaptive learning",
+    description: "Live prediction dashboard with StochRSI + MA-StochRSI indicators",
   },
 };
 

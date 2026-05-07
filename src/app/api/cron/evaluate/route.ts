@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  evaluatePastPredictions,
-  optimizeParameters,
-  recordModelPerformance,
-} from '@/lib/learning/optimizer';
+import { createServerClient } from '@/lib/supabase';
+import { fetchLatestPrice } from '@/lib/mexc';
 
 // ---------------------------------------------------------------------------
-// CRON_SECRET guard – allows all requests when the env var is not set
+// CRON_SECRET guard
 // ---------------------------------------------------------------------------
 
 function verifyCronSecret(request: NextRequest): NextResponse | null {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return null; // dev mode – allow all
+  if (!secret) return null;
 
   const fromHeader = request.headers.get('x-cron-secret') ?? request.headers.get('authorization');
   const fromQuery = request.nextUrl.searchParams.get('cron_secret');
@@ -25,59 +22,98 @@ function verifyCronSecret(request: NextRequest): NextResponse | null {
 
 // ---------------------------------------------------------------------------
 // GET /api/cron/evaluate
+// Evaluates past predictions whose target_time has passed but haven't been
+// evaluated yet. Compares predicted direction against actual price movement.
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest) {
-  // Auth guard
   const authError = verifyCronSecret(request);
   if (authError) return authError;
 
   try {
-    // ------------------------------------------------------------------
-    // 1. Evaluate past predictions against actual outcomes
-    // ------------------------------------------------------------------
-    const evaluation = await evaluatePastPredictions();
+    const supabase = createServerClient();
+    const now = new Date().toISOString();
 
     // ------------------------------------------------------------------
-    // 2. Optimize parameters based on evaluation results
+    // 1. Find unevaluated predictions whose target_time has passed
     // ------------------------------------------------------------------
-    const newParams = await optimizeParameters();
+    const { data: pendingPredictions, error: fetchError } = await supabase
+      .from('predictions')
+      .select('id, symbol, direction, target_time, price_at_prediction')
+      .eq('evaluated', false)
+      .lt('target_time', now)
+      .order('target_time', { ascending: true })
+      .limit(50);
 
-    // Determine if params were actually updated (check if new params differ)
-    const optimization = {
-      updated: true,
-      new_params: {
-        rsi_period: newParams.rsi_period,
-        stoch_period: newParams.stoch_period,
-        k_smooth: newParams.k_smooth,
-        d_smooth: newParams.d_smooth,
-        ma_type: newParams.ma_type,
-        ma_period: newParams.ma_period,
-        overbought_threshold: newParams.overbought_threshold,
-        oversold_threshold: newParams.oversold_threshold,
-        confidence_weight_stochrsi: newParams.confidence_weight_stochrsi,
-        confidence_weight_ma: newParams.confidence_weight_ma,
-        performance_score: newParams.performance_score,
-      },
-    };
+    if (fetchError) {
+      console.error('[evaluate] Fetch error:', fetchError.message);
+      return NextResponse.json(
+        { success: false, error: fetchError.message },
+        { status: 500 }
+      );
+    }
+
+    if (!pendingPredictions || pendingPredictions.length === 0) {
+      return NextResponse.json({
+        success: true,
+        evaluated: 0,
+        wins: 0,
+        losses: 0,
+      });
+    }
 
     // ------------------------------------------------------------------
-    // 3. Record a performance snapshot
+    // 2. Evaluate each prediction
     // ------------------------------------------------------------------
-    await recordModelPerformance();
+    let wins = 0;
+    let losses = 0;
+    const evaluatedIds: number[] = [];
 
-    // ------------------------------------------------------------------
-    // 4. Return results
-    // ------------------------------------------------------------------
+    for (const pred of pendingPredictions) {
+      // Get the current price for this symbol to determine actual direction
+      try {
+        const { price: currentPrice } = await fetchLatestPrice(pred.symbol);
+
+        // Determine actual direction: if price went up from prediction time → UP
+        const actualDirection = currentPrice >= (pred.price_at_prediction ?? currentPrice) ? 'UP' : 'DOWN';
+        const result = actualDirection === pred.direction ? 'WIN' : 'LOSS';
+        const priceChangePct = pred.price_at_prediction
+          ? ((currentPrice - pred.price_at_prediction) / pred.price_at_prediction) * 100
+          : 0;
+
+        if (result === 'WIN') wins++;
+        else losses++;
+
+        // Insert outcome record
+        await supabase.from('outcomes').insert({
+          prediction_id: pred.id,
+          actual_direction: actualDirection,
+          price_at_target: currentPrice,
+          price_change_pct: priceChangePct,
+          result,
+        });
+
+        // Update the prediction record
+        await supabase
+          .from('predictions')
+          .update({
+            evaluated: true,
+            outcome: result,
+          })
+          .eq('id', pred.id);
+
+        evaluatedIds.push(pred.id);
+      } catch (priceError) {
+        console.error(`[evaluate] Price fetch failed for prediction ${pred.id}:`, priceError);
+        // Skip this prediction, try again next time
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      evaluated: {
-        evaluated: evaluation.evaluated,
-        wins: evaluation.wins,
-        losses: evaluation.losses,
-      },
-      optimization,
-      performance_recorded: true,
+      evaluated: evaluatedIds.length,
+      wins,
+      losses,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
