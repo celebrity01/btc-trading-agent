@@ -2,11 +2,19 @@
   "crons": [
     {
       "path": "/api/cron/fetch-and-predict",
-      "schedule": "0,30 * * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/cron/evaluate",
-      "schedule": "5,35 * * * *"
+      "schedule": "30 0 * * *"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate" }
+      ]
     }
   ]
 }
